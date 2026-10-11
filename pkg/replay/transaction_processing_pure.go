@@ -135,7 +135,6 @@ func LoadAndExecuteTransaction(input LoadAndExecuteTransactionInput) LoadAndExec
 		if *input.DiagnosticComputeUnitLimit == 0 {
 			return sanitizeFailureOutput()
 		}
-		computeBudgetLimits.ComputeUnitLimit = *input.DiagnosticComputeUnitLimit
 	}
 
 	// Validate transaction age
@@ -198,6 +197,10 @@ func LoadAndExecuteTransaction(input LoadAndExecuteTransactionInput) LoadAndExec
 	// Create execution context
 	log := sealevel.LogRecorder{BytesLimit: input.LogBytesLimit}
 	execCtx := newExecCtx(slotCtx, transactionAccts, computeBudgetLimits, &log)
+	if input.DiagnosticComputeUnitLimit != nil {
+		// Keep transaction limits intact for fee calculation and metadata.
+		execCtx.ComputeMeter = cu.NewComputeMeter(uint64(*input.DiagnosticComputeUnitLimit))
+	}
 	execCtx.TransactionContext.AllInstructions = instrs
 	execCtx.TransactionContext.Signature = tx.Signatures[0]
 	execCtx.TransactionContext.BorrowedAccountArena = input.Arena
