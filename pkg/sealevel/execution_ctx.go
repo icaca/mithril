@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gagliardetto/solana-go"
 	"github.com/sonicfromnewyoke/mithril/pkg/accounts"
 	"github.com/sonicfromnewyoke/mithril/pkg/accountsdb"
 	a "github.com/sonicfromnewyoke/mithril/pkg/addresses"
@@ -14,10 +15,11 @@ import (
 	"github.com/sonicfromnewyoke/mithril/pkg/features"
 	"github.com/sonicfromnewyoke/mithril/pkg/lthash"
 	"github.com/sonicfromnewyoke/mithril/pkg/metrics"
-	"github.com/gagliardetto/solana-go"
 )
 
 type ExecutionCtx struct {
+	// InvocationCU records inclusive execution CU in completion order.
+	InvocationCU             []InvocationCU
 	Log                      Logger
 	Accounts                 accounts.Accounts
 	TransactionContext       *TransactionCtx
@@ -47,6 +49,13 @@ type ExecutionCtx struct {
 	// invoke_context.rs process_executable_chain), so the framing in
 	// ExecuteInstruction consumes this via takeProgramRunRawErr.
 	programRunRawErr error
+}
+
+type InvocationCU struct {
+	Program   solana.PublicKey
+	Depth     uint64
+	Units     uint64
+	Succeeded bool
 }
 
 // takeProgramRunRawErr returns and clears the stashed raw run error. It is
@@ -271,11 +280,20 @@ func (execCtx *ExecutionCtx) ProcessInstruction(instrData []byte, instructionAcc
 		}
 	}
 
+	programKey, keyErr := nextInstrCtx.LastProgramKey(execCtx.TransactionContext)
+	if keyErr != nil {
+		return keyErr
+	}
+	depth, before := execCtx.StackHeight(), execCtx.ComputeMeter.Used()
 	err1 := execCtx.ExecuteInstruction()
 
 	start = time.Now()
 	err2 := execCtx.Pop()
 	metrics.GlobalBlockReplay.IxPop.AddTimingSince(start)
+	execCtx.InvocationCU = append(execCtx.InvocationCU, InvocationCU{
+		Program: programKey, Depth: depth,
+		Units: execCtx.ComputeMeter.Used() - before, Succeeded: err1 == nil && err2 == nil,
+	})
 
 	if err1 != nil {
 		return err1

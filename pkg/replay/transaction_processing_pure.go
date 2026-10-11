@@ -5,6 +5,8 @@ import (
 	"math"
 	"time"
 
+	"github.com/gagliardetto/solana-go"
+	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/sonicfromnewyoke/mithril/pkg/accounts"
 	"github.com/sonicfromnewyoke/mithril/pkg/arena"
 	"github.com/sonicfromnewyoke/mithril/pkg/cu"
@@ -14,8 +16,6 @@ import (
 	"github.com/sonicfromnewyoke/mithril/pkg/migration"
 	"github.com/sonicfromnewyoke/mithril/pkg/rent"
 	"github.com/sonicfromnewyoke/mithril/pkg/sealevel"
-	"github.com/gagliardetto/solana-go"
-	"github.com/gagliardetto/solana-go/rpc"
 )
 
 // LoadAndExecuteTransactionInput contains all the input state needed for pure transaction processing
@@ -37,6 +37,14 @@ type LoadAndExecuteTransactionInput struct {
 	// execution (Agave LogCollector semantics: a "Log truncated" marker is
 	// appended once the limit is reached). Nil records logs unbounded.
 	LogBytesLimit *uint64
+	// DiagnosticComputeUnitLimit overrides only the execution meter, without
+	// modifying the transaction. This finite diagnostic budget is not a
+	// transaction budget accepted by the network. Nil keeps normal processing.
+	DiagnosticComputeUnitLimit *uint32
+	// PreserveRentEpoch keeps diagnostic fixture metadata intact rather than
+	// applying transaction-pipeline rent_epoch normalization. Normal replay
+	// leaves this false. It requires an explicit diagnostic budget.
+	PreserveRentEpoch bool
 }
 
 // LoadAndExecuteTransaction is a pure function that loads and executes a transaction.
@@ -57,6 +65,9 @@ func sanitizeFailureOutput() LoadAndExecuteTransactionOutput {
 }
 
 func LoadAndExecuteTransaction(input LoadAndExecuteTransactionInput) LoadAndExecuteTransactionOutput {
+	if input.PreserveRentEpoch && input.DiagnosticComputeUnitLimit == nil {
+		return sanitizeFailureOutput()
+	}
 	tx := input.Transaction
 	slotCtx := input.SlotCtx
 
@@ -120,6 +131,12 @@ func LoadAndExecuteTransaction(input LoadAndExecuteTransactionInput) LoadAndExec
 		}
 	}
 	metrics.GlobalBlockReplay.ComputeBudgetExecutionInstructions.AddTimingSince(start)
+	if input.DiagnosticComputeUnitLimit != nil {
+		if *input.DiagnosticComputeUnitLimit == 0 {
+			return sanitizeFailureOutput()
+		}
+		computeBudgetLimits.ComputeUnitLimit = *input.DiagnosticComputeUnitLimit
+	}
 
 	// Validate transaction age
 	if !sealevel.IsTransactionAgeValid(tx, instrs, slotCtx) {
@@ -251,7 +268,9 @@ func LoadAndExecuteTransaction(input LoadAndExecuteTransactionInput) LoadAndExec
 
 	// Set rent-exempt rent epoch max and compute pre-tx rent states
 	start = time.Now()
-	rent.MaybeSetRentExemptRentEpochMax(slotCtx, &rentSysvar, &execCtx.Features, &execCtx.TransactionContext.Accounts)
+	if !input.PreserveRentEpoch {
+		rent.MaybeSetRentExemptRentEpochMax(slotCtx, &rentSysvar, &execCtx.Features, &execCtx.TransactionContext.Accounts)
+	}
 	preTxRentStates := rent.NewRentStateInfo(&rentSysvar, execCtx.TransactionContext, &execCtx.Features)
 	metrics.GlobalBlockReplay.PreTxRentStates.AddTimingSince(start)
 
