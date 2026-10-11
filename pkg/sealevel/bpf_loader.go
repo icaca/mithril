@@ -1579,7 +1579,9 @@ func BpfLoaderProgramExecute(execCtx *ExecutionCtx) error {
 		}
 
 		start := time.Now()
-		programDataAcct, err := execCtx.SlotCtx.GetAccount(programAcctState.Program.ProgramDataAddress)
+		// ProgramData is only read here; the ELF loader and cache binding own
+		// their copies. Keep bank metadata and source checks without cloning it.
+		programDataAcct, err := execCtx.SlotCtx.GetAccountShared(programAcctState.Program.ProgramDataAddress)
 		if err != nil {
 			programDataAcct, err = execCtx.SlotCtx.GetAccountFromAccountsDb(programAcctState.Program.ProgramDataAddress)
 			if err != nil {
