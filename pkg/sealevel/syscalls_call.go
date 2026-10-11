@@ -5,10 +5,10 @@ import (
 	"slices"
 
 	//"github.com/sonicfromnewyoke/mithril/pkg/mlog"
+	"github.com/gagliardetto/solana-go"
 	"github.com/sonicfromnewyoke/mithril/pkg/cu"
 	"github.com/sonicfromnewyoke/mithril/pkg/safemath"
 	"github.com/sonicfromnewyoke/mithril/pkg/sbpf"
-	"github.com/gagliardetto/solana-go"
 )
 
 // SyscallGetStackHeightImpl is an implementation of the sol_get_stack_height syscall
@@ -53,11 +53,11 @@ func SyscallGetReturnDataImpl(vm sbpf.VM, returnDataAddr, length, programIdAddr 
 			return syscallErr(err)
 		}
 
-		if len(returnData) != len(returnDataResult) {
+		if int(length) != len(returnDataResult) {
 			return syscallErr(SyscallErrInvalidLength)
 		}
 
-		copy(returnDataResult, returnData)
+		copy(returnDataResult, returnData[:length])
 
 		var programIdResult []byte
 		programIdResult, err = vm.Translate(programIdAddr, solana.PublicKeyLength, true)
@@ -170,7 +170,7 @@ func SyscallGetProcessedSiblingInstructionImpl(vm sbpf.VM, index, metaAddr, prog
 	}
 
 	if instrCtxFound != nil {
-		resultsHeaderBytes, err := vm.Translate(metaAddr, ProcessedSiblingInstructionSize, false)
+		resultsHeaderBytes, err := vm.Translate(metaAddr, ProcessedSiblingInstructionSize, true)
 		if err != nil {
 			return syscallErr(err)
 		}

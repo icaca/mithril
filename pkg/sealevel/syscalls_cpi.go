@@ -809,7 +809,7 @@ func updateCallerAccount(vm sbpf.VM, callerAcct *CallerAccount, calleeAcct *Borr
 		binary.LittleEndian.PutUint64(callerAcct.RefToLenInVm, postLen)
 
 		ptrAddr := safemath.SaturatingSubU64(callerAcct.VmDataAddr, 8)
-		serializedLenSlice, err := vm.Translate(ptrAddr, 8, false)
+		serializedLenSlice, err := vm.Translate(ptrAddr, 8, true)
 		if err != nil {
 			return err
 		}

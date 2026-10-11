@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	bin "github.com/gagliardetto/binary"
+	"github.com/gagliardetto/solana-go"
 	"github.com/sonicfromnewyoke/mithril/fixtures"
 	"github.com/sonicfromnewyoke/mithril/pkg/accounts"
 	a "github.com/sonicfromnewyoke/mithril/pkg/addresses"
@@ -18,8 +20,6 @@ import (
 	"github.com/sonicfromnewyoke/mithril/pkg/features"
 	"github.com/sonicfromnewyoke/mithril/pkg/sbpf"
 	"github.com/sonicfromnewyoke/mithril/pkg/sbpf/loader"
-	bin "github.com/gagliardetto/binary"
-	"github.com/gagliardetto/solana-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -65,21 +65,24 @@ func TestInterpreter_Noop(t *testing.T) {
 
 	var log LogRecorder
 
+	execCtx := &ExecutionCtx{Log: &log, ComputeMeter: cu.NewComputeMeterDefault()}
 	interpreter := sbpf.NewInterpreter(program, &sbpf.VMOpts{
-		HeapMax:  32 * 1024,
-		Input:    nil,
-		MaxCU:    10000,
-		Syscalls: ToFunc(syscalls),
-		Context:  &ExecutionCtx{Log: &log, ComputeMeter: cu.NewComputeMeterDefault()},
+		HeapMax:      32 * 1024,
+		Input:        nil,
+		MaxCU:        10000,
+		Syscalls:     ToFunc(syscalls),
+		Context:      execCtx,
+		ComputeMeter: &execCtx.ComputeMeter,
 	})
 	require.NotNil(t, interpreter)
+	defer interpreter.Finish()
 
 	_, _, err = interpreter.Run()
 	require.NoError(t, err)
 
 	assert.Equal(t, log.Logs, []string{
 		"Program log: entrypoint\x00",
-		"Program log: 0x1, 0x2, 0x3, 0x4, 0x5\n",
+		"Program log: 0x1, 0x2, 0x3, 0x4, 0x5",
 	})
 }
 
@@ -416,15 +419,18 @@ func TestInterpreter_Sha256(t *testing.T) {
 	syscalls.Register("my_memcmp", SyscallMemcmp)
 
 	var log LogRecorder
+	ctx := &ExecutionCtx{Log: &log, ComputeMeter: cu.NewComputeMeterDefault()}
 
 	interpreter := sbpf.NewInterpreter(program, &sbpf.VMOpts{
-		HeapMax:  32 * 1024,
-		Input:    nil,
-		MaxCU:    10000,
-		Syscalls: ToFunc(syscalls),
-		Context:  &ExecutionCtx{Log: &log, ComputeMeter: cu.NewComputeMeterDefault()},
+		HeapMax:      32 * 1024,
+		Input:        nil,
+		MaxCU:        10000,
+		Syscalls:     ToFunc(syscalls),
+		Context:      ctx,
+		ComputeMeter: &ctx.ComputeMeter,
 	})
 	require.NotNil(t, interpreter)
+	defer interpreter.Finish()
 
 	_, _, err = interpreter.Run()
 	require.NoError(t, err)

@@ -3,13 +3,13 @@ package sealevel
 import (
 	"bytes"
 
+	bin "github.com/gagliardetto/binary"
+	"github.com/gagliardetto/solana-go"
 	"github.com/sonicfromnewyoke/mithril/pkg/accountsdb"
 	"github.com/sonicfromnewyoke/mithril/pkg/addresses"
 	"github.com/sonicfromnewyoke/mithril/pkg/cu"
 	"github.com/sonicfromnewyoke/mithril/pkg/features"
 	"github.com/sonicfromnewyoke/mithril/pkg/sbpf"
-	bin "github.com/gagliardetto/binary"
-	"github.com/gagliardetto/solana-go"
 )
 
 const (
@@ -274,38 +274,28 @@ func LoaderV4Execute(execCtx *ExecutionCtx) error {
 			return err
 		}
 
-		var loadedProgram *sbpf.Program
 		var programBytes []byte
-
-		programCacheEntry, hasLoadedProgram := execCtx.SlotCtx.AccountsDb.MaybeGetProgramFromCache(program.Key())
-		if hasLoadedProgram {
-			if programCacheEntry.DeploymentSlot >= execCtx.SlotCtx.Slot {
-				return InstrErrInvalidAccountData
-			}
-			loadedProgram = programCacheEntry.Program
-		} else {
-			programDataAcct, err := execCtx.SlotCtx.GetAccount(program.Key())
-			if err != nil {
-				programDataAcct, err = execCtx.SlotCtx.GetAccountFromAccountsDb(program.Key())
-				if err != nil {
-					return InstrErrUnsupportedProgramId
-				}
-			}
-
-			state, err := decodeLoaderV4State(programDataAcct.Data)
+		programDataAcct, err := execCtx.SlotCtx.GetAccount(program.Key())
+		if err != nil {
+			programDataAcct, err = execCtx.SlotCtx.GetAccountFromAccountsDb(program.Key())
 			if err != nil {
 				return InstrErrUnsupportedProgramId
 			}
-
-			if state.Status == LoaderV4StatusRetracted {
-				return InstrErrUnsupportedProgramId
-			}
-			if state.Slot >= execCtx.SlotCtx.Slot {
-				return InstrErrUnsupportedProgramId
-			}
-
-			programBytes = programDataAcct.Data[loaderV4ProgramDataOffset:]
 		}
+
+		state, err := decodeLoaderV4State(programDataAcct.Data)
+		if err != nil {
+			return InstrErrUnsupportedProgramId
+		}
+
+		if state.Status == LoaderV4StatusRetracted {
+			return InstrErrUnsupportedProgramId
+		}
+		if state.Slot >= execCtx.SlotCtx.Slot {
+			return InstrErrUnsupportedProgramId
+		}
+
+		programBytes = programDataAcct.Data[loaderV4ProgramDataOffset:]
 
 		syscallRegistry := sbpf.SyscallRegistry(func(u uint32) (sbpf.Syscall, bool) {
 			return Syscalls(&execCtx.Features, false, u)
@@ -313,13 +303,8 @@ func LoaderV4Execute(execCtx *ExecutionCtx) error {
 
 		program.Drop()
 
-		// two cases here: we're either executing from the program cache, so from a pre-parsed/loaded program, or from bytes if
-		// the the program was not found in the cache.
-		if hasLoadedProgram {
-			err = executeLoadedProgram(execCtx, loadedProgram, syscallRegistry)
-		} else {
-			err = executeProgramFromBytes(execCtx, program.Key(), programBytes, syscallRegistry)
-		}
+		err = executeProgramFromBytes(execCtx, program.Key(), programBytes, syscallRegistry)
+
 	}
 
 	return err

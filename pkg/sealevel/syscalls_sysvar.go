@@ -10,10 +10,9 @@ import (
 	"github.com/sonicfromnewyoke/mithril/pkg/cu"
 
 	//"github.com/sonicfromnewyoke/mithril/pkg/mlog"
+	"github.com/gagliardetto/solana-go"
 	"github.com/sonicfromnewyoke/mithril/pkg/safemath"
 	"github.com/sonicfromnewyoke/mithril/pkg/sbpf"
-	"github.com/sonicfromnewyoke/mithril/pkg/util"
-	"github.com/gagliardetto/solana-go"
 )
 
 // SyscallGetClockSysvarImpl is an implementation of the sol_get_clock_sysvar syscall
@@ -172,9 +171,9 @@ func SyscallGetEpochRewardsSysvarImpl(vm sbpf.VM, addr uint64) (uint64, error) {
 	binary.LittleEndian.PutUint64(epochRewardsDst[8:16], epochRewards.NumPartitions)
 	copy(epochRewardsDst[16:48], epochRewards.ParentBlockhash[:])
 
+	// repr(C) u128 uses little-endian low/high limbs on the SBF target.
 	binary.LittleEndian.PutUint64(epochRewardsDst[48:56], epochRewards.TotalPoints.Lo)
 	binary.LittleEndian.PutUint64(epochRewardsDst[56:64], epochRewards.TotalPoints.Hi)
-	util.ReverseBytesInPlace(epochRewardsDst[48:64])
 
 	binary.LittleEndian.PutUint64(epochRewardsDst[64:72], epochRewards.TotalRewards)
 	binary.LittleEndian.PutUint64(epochRewardsDst[72:80], epochRewards.DistributedRewards)

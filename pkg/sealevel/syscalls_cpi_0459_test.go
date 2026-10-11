@@ -1,13 +1,40 @@
 package sealevel
 
 import (
+	"encoding/binary"
 	"testing"
 
+	"github.com/sonicfromnewyoke/mithril/pkg/accounts"
 	"github.com/sonicfromnewyoke/mithril/pkg/cu"
 	feat "github.com/sonicfromnewyoke/mithril/pkg/features"
 	"github.com/sonicfromnewyoke/mithril/pkg/sbpf"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCpiSerializedLengthClearedOnFinish(t *testing.T) {
+	old := sbpf.UsePool
+	sbpf.UsePool = true
+	t.Cleanup(func() { sbpf.UsePool = old })
+	ctx := &ExecutionCtx{Features: *feat.NewFeaturesDefault(), ComputeMeter: cu.NewComputeMeter(100000)}
+	vm := sbpf.NewInterpreter(&sbpf.Program{TextVA: sbpf.VaddrProgram}, &sbpf.VMOpts{
+		HeapMax: 32768, Input: make([]byte, 256), Context: ctx, ComputeMeter: &ctx.ComputeMeter,
+	})
+	// A read-only view must not mark the length header dirty for the syscall.
+	heap, err := vm.Translate(sbpf.VaddrHeap, 16, false)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		vm.Finish()
+		require.Equal(t, make([]byte, 16), heap)
+	})
+	caller, err := callerAccountFromAccountInfoC(vm, ctx, 0, 0, SolAccountInfoC{
+		LamportsAddr: sbpf.VaddrInput + 128, OwnerAddr: sbpf.VaddrInput + 160,
+		DataAddr: sbpf.VaddrHeap + 8, DataLen: 0,
+	}, sbpf.VaddrInput, false)
+	require.NoError(t, err)
+	callee := &BorrowedAccount{Account: &accounts.Account{Data: make([]byte, 8)}}
+	require.NoError(t, updateCallerAccount(vm, &caller, callee, false))
+	require.Equal(t, uint64(8), binary.LittleEndian.Uint64(heap))
+}
 
 func TestSyscallParameterAddressRangeRestricted(t *testing.T) {
 	features := feat.NewFeaturesDefault()

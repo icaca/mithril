@@ -9,19 +9,21 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime/trace"
 	"sync"
 	"sync/atomic"
 
-	"github.com/sonicfromnewyoke/mithril/pkg/accounts"
-	"github.com/sonicfromnewyoke/mithril/pkg/addresses"
-	"github.com/sonicfromnewyoke/mithril/pkg/mlog"
-	"github.com/sonicfromnewyoke/mithril/pkg/sbpf"
 	"github.com/cockroachdb/pebble"
 	"github.com/gagliardetto/solana-go"
 	"github.com/maypok86/otter"
+	"github.com/sonicfromnewyoke/mithril/pkg/accounts"
+	"github.com/sonicfromnewyoke/mithril/pkg/addresses"
+	"github.com/sonicfromnewyoke/mithril/pkg/features"
+	"github.com/sonicfromnewyoke/mithril/pkg/mlog"
+	"github.com/sonicfromnewyoke/mithril/pkg/sbpf"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -200,6 +202,24 @@ func (accountsDb *AccountsDb) InitCaches() {
 type ProgramCacheEntry struct {
 	Program        *sbpf.Program
 	DeploymentSlot uint64
+	// Executables are reusable across banks only for identical source and loader
+	// features. Slot alone is not a version: competing forks can deploy at the
+	// same slot. Fields are immutable after cache publication.
+	sourceBytes    []byte
+	sourceBound    bool
+	sourceFeatures features.Features
+}
+
+// BindSource must be called before publishing the entry; published bindings
+// must never be mutated, including when another bank replaces the cache key.
+func (entry *ProgramCacheEntry) BindSource(source []byte, f *features.Features) {
+	entry.sourceBytes = bytes.Clone(source)
+	entry.sourceBound = true
+	entry.sourceFeatures = maps.Clone(*f)
+}
+
+func (entry *ProgramCacheEntry) MatchesSource(source []byte, f *features.Features) bool {
+	return entry != nil && entry.sourceBound && bytes.Equal(entry.sourceBytes, source) && maps.Equal(entry.sourceFeatures, *f)
 }
 
 func programCacheCapacityUnits() int {
@@ -213,7 +233,7 @@ func (entry *ProgramCacheEntry) CostUnits() uint32 {
 	if entry == nil || entry.Program == nil {
 		return 1
 	}
-	bytes := entry.Program.MemoryBytes()
+	bytes := entry.Program.MemoryBytes() + uint64(len(entry.sourceBytes))
 	units := (bytes + programCacheCostUnitBytes - 1) / programCacheCostUnitBytes
 	if units == 0 {
 		return 1
