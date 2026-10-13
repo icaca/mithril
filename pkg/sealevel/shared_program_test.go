@@ -78,3 +78,44 @@ func TestSharedProgramHashCollisions(t *testing.T) {
 	_, err = loadSharedProgram(source, f, false, hash)
 	require.Error(t, err, "a hash collision must not bypass ELF validation")
 }
+
+func TestSharedProgramImmutableIdentity(t *testing.T) {
+	source := append(fixtures.Load(t, "sealevel", "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr.so"), 0, 1)
+	f := features.NewFeaturesDefault()
+	p, err := LoadSharedProgramImmutable(source, f, true)
+	require.NoError(t, err)
+	again, err := LoadSharedProgramImmutable(source, features.NewFeaturesDefault(), true)
+	require.NoError(t, err)
+	require.Same(t, p, again)
+	runtime, err := LoadSharedProgramImmutable(source, f, false)
+	require.NoError(t, err)
+	require.Same(t, p, runtime)
+
+	shorter, err := LoadSharedProgramImmutable(source[:len(source)-1], f, true)
+	require.NoError(t, err)
+	require.NotSame(t, p, shorter, "same address with different length must miss")
+	other := bytes.Clone(source)
+	other[len(other)-1] = 2
+	different, err := LoadSharedProgramImmutable(other, f, true)
+	require.NoError(t, err)
+	require.NotSame(t, p, different, "different bytes at another address must miss")
+
+	gate := features.FeatureGate{Name: "immutable-program-test", Address: [32]byte{180}}
+	f.EnableFeature(gate, 1)
+	changed, err := LoadSharedProgramImmutable(source, f, true)
+	require.NoError(t, err)
+	require.NotSame(t, p, changed, "feature changes must miss even on the same source")
+	f.EnableFeature(gate, 2)
+	changedSlot, err := LoadSharedProgramImmutable(source, f, true)
+	require.NoError(t, err)
+	require.NotSame(t, changed, changedSlot, "activation slot is part of feature identity")
+
+	invalid := bytes.Replace(source, []byte("sol_log_"), []byte("bad_log_"), 1)
+	require.NotEqual(t, source, invalid)
+	_, err = LoadSharedProgramImmutable(invalid, f, false)
+	require.NoError(t, err)
+	_, err = LoadSharedProgramImmutable(invalid, f, true)
+	require.Error(t, err, "a runtime hit must not bypass deployment checks")
+	_, err = LoadSharedProgramImmutable(nil, f, true)
+	require.Error(t, err)
+}

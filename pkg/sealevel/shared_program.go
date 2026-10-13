@@ -43,6 +43,40 @@ func LoadSharedProgram(source []byte, f *features.Features, deployment bool) (*s
 	return loadSharedProgram(source, f, deployment, maphash.Bytes(sharedPrograms.seed, source))
 }
 
+type immutableProgramKey struct {
+	// A Go pointer keeps the allocation alive, preventing address reuse after GC.
+	source     *byte
+	size       int
+	features   [32]byte
+	deployment bool
+}
+
+var immutablePrograms = struct {
+	sync.Mutex
+	programs map[immutableProgramKey]*sbpf.Program
+}{programs: make(map[immutableProgramKey]*sbpf.Program)}
+
+// LoadSharedProgramImmutable is LoadSharedProgram with an address-based fast path.
+// The caller must never modify source bytes for the lifetime of the process.
+// The cache retains their backing allocation as well as the compiled program.
+func LoadSharedProgramImmutable(source []byte, f *features.Features, deployment bool) (*sbpf.Program, error) {
+	if len(source) == 0 {
+		return LoadSharedProgram(source, f, deployment)
+	}
+	key := immutableProgramKey{source: &source[0], size: len(source), features: programFeaturesHash(f), deployment: deployment}
+	immutablePrograms.Lock()
+	defer immutablePrograms.Unlock()
+	if p := immutablePrograms.programs[key]; p != nil {
+		return p, nil
+	}
+	p, err := LoadSharedProgram(source, f, deployment)
+	if err != nil {
+		return nil, err
+	}
+	immutablePrograms.programs[key] = p
+	return p, nil
+}
+
 func loadSharedProgram(source []byte, f *features.Features, deployment bool, sourceHash uint64) (*sbpf.Program, error) {
 	key := sharedProgramKey{source: sourceHash, size: len(source), features: programFeaturesHash(f)}
 	sharedPrograms.Lock()
