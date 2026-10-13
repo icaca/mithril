@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"hash/maphash"
 	"slices"
 	"sync"
 
@@ -15,17 +16,21 @@ import (
 )
 
 type sharedProgramKey struct {
-	source, features [32]byte
+	source   uint64
+	size     int
+	features [32]byte
 }
 
 // Retain compiled programs for the process lifetime, independently of VM caches.
 // The lock also prevents concurrent first loads from compiling the same ELF twice.
 var sharedPrograms = struct {
 	sync.Mutex
-	programs map[sharedProgramKey]*sharedProgram
-}{programs: make(map[sharedProgramKey]*sharedProgram)}
+	seed     maphash.Seed
+	programs map[sharedProgramKey][]*sharedProgram
+}{seed: maphash.MakeSeed(), programs: make(map[sharedProgramKey][]*sharedProgram)}
 
 type sharedProgram struct {
+	source                      []byte
 	program                     *sbpf.Program
 	executionErr, deploymentErr error
 }
@@ -35,10 +40,20 @@ type sharedProgram struct {
 // execution state. Both syscall environments are checked before publication so
 // neither a runtime hit nor a deployment hit can bypass the other's validation.
 func LoadSharedProgram(source []byte, f *features.Features, deployment bool) (*sbpf.Program, error) {
-	key := sharedProgramKey{source: sha256.Sum256(source), features: programFeaturesHash(f)}
+	return loadSharedProgram(source, f, deployment, maphash.Bytes(sharedPrograms.seed, source))
+}
+
+func loadSharedProgram(source []byte, f *features.Features, deployment bool, sourceHash uint64) (*sbpf.Program, error) {
+	key := sharedProgramKey{source: sourceHash, size: len(source), features: programFeaturesHash(f)}
 	sharedPrograms.Lock()
 	defer sharedPrograms.Unlock()
-	entry := sharedPrograms.programs[key]
+	var entry *sharedProgram
+	for _, cached := range sharedPrograms.programs[key] {
+		if bytes.Equal(cached.source, source) {
+			entry = cached
+			break
+		}
+	}
 	if entry == nil {
 		// Relocation output is registry-independent. Validate its function hashes
 		// and imported symbols below, using the same checks as Loader.relocate.
@@ -56,8 +71,8 @@ func LoadSharedProgram(source []byte, f *features.Features, deployment bool) (*s
 			}
 			return nil, err
 		}
-		entry = &sharedProgram{program: p, executionErr: checkProgramSyscalls(p, f, false), deploymentErr: checkProgramSyscalls(p, f, true)}
-		sharedPrograms.programs[key] = entry
+		entry = &sharedProgram{source: bytes.Clone(source), program: p, executionErr: checkProgramSyscalls(p, f, false), deploymentErr: checkProgramSyscalls(p, f, true)}
+		sharedPrograms.programs[key] = append(sharedPrograms.programs[key], entry)
 	}
 	err := entry.executionErr
 	if deployment {

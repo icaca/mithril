@@ -53,3 +53,28 @@ func TestSharedProgramContentAndFeatures(t *testing.T) {
 	_, err = LoadSharedProgram(invalid, f, true)
 	require.Error(t, err)
 }
+
+func TestSharedProgramHashCollisions(t *testing.T) {
+	source := append(fixtures.Load(t, "sealevel", "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr.so"), 0)
+	f := features.NewFeaturesDefault()
+	// Supply one hash for every source to exercise the actual collision bucket.
+	const hash = 0
+	first, err := loadSharedProgram(source, f, true, hash)
+	require.NoError(t, err)
+	original := bytes.Clone(source)
+	source[len(source)-1] = 1
+	second, err := loadSharedProgram(source, f, true, hash)
+	require.NoError(t, err)
+	require.NotSame(t, first, second, "colliding same-length sources must compile independently")
+
+	again, err := loadSharedProgram(original, f, false, hash)
+	require.NoError(t, err)
+	require.Same(t, first, again, "the cache must own a source copy and retain both colliding entries")
+	again, err = loadSharedProgram(bytes.Clone(source), f, false, hash)
+	require.NoError(t, err)
+	require.Same(t, second, again)
+
+	source[0] = 0 // invalid ELF, still the same length and forced hash
+	_, err = loadSharedProgram(source, f, false, hash)
+	require.Error(t, err, "a hash collision must not bypass ELF validation")
+}
