@@ -36,6 +36,9 @@ type AccountsDb struct {
 	CommonAcctsCache otter.Cache[solana.PublicKey, *accounts.Account]
 	ProgramCache     otter.Cache[solana.PublicKey, *ProgramCacheEntry]
 
+	// Opt in only for short-lived VMs whose programs may live for the process lifetime.
+	UseSharedProgramCache bool
+
 	// A list of store requests. They are added to the back as they arrive and
 	// removed from the front as they are persisted.
 	inProgressStoreRequestsMu sync.Mutex
@@ -205,21 +208,40 @@ type ProgramCacheEntry struct {
 	// Executables are reusable across banks only for identical source and loader
 	// features. Slot alone is not a version: competing forks can deploy at the
 	// same slot. Fields are immutable after cache publication.
-	sourceBytes    []byte
-	sourceBound    bool
-	sourceFeatures features.Features
+	sourceBytes     []byte
+	sourceBound     bool
+	immutableSource bool
+	sourceFeatures  features.Features
 }
 
 // BindSource must be called before publishing the entry; published bindings
 // must never be mutated, including when another bank replaces the cache key.
 func (entry *ProgramCacheEntry) BindSource(source []byte, f *features.Features) {
+	entry.immutableSource = false
 	entry.sourceBytes = bytes.Clone(source)
 	entry.sourceBound = true
 	entry.sourceFeatures = maps.Clone(*f)
 }
 
+// BindImmutableSource avoids scanning source on cache hits. The caller must own
+// the source exclusively and evict this binding BEFORE exposing any mutable
+// alias, including transaction account references. Replacements must allocate
+// fresh storage. General bank callers must use BindSource instead.
+func (entry *ProgramCacheEntry) BindImmutableSource(source []byte, f *features.Features) {
+	entry.sourceBytes = source
+	entry.sourceBound = true
+	entry.immutableSource = true
+	entry.sourceFeatures = maps.Clone(*f)
+}
+
 func (entry *ProgramCacheEntry) MatchesSource(source []byte, f *features.Features) bool {
-	return entry != nil && entry.sourceBound && bytes.Equal(entry.sourceBytes, source) && maps.Equal(entry.sourceFeatures, *f)
+	if entry == nil || !entry.sourceBound || !maps.Equal(entry.sourceFeatures, *f) {
+		return false
+	}
+	if entry.immutableSource {
+		return len(source) == len(entry.sourceBytes) && len(source) != 0 && &source[0] == &entry.sourceBytes[0]
+	}
+	return bytes.Equal(entry.sourceBytes, source)
 }
 
 func programCacheCapacityUnits() int {

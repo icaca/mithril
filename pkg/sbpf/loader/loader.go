@@ -27,8 +27,9 @@ type Loader struct {
 	rd       io.ReaderAt
 	fileSize uint64
 
-	syscalls        sbpf.SyscallRegistry
-	elfDeployChecks bool
+	syscalls         sbpf.SyscallRegistry
+	elfDeployChecks  bool
+	importedSyscalls []string
 
 	minSbpfVersion uint32
 	maxSbpfVersion uint32
@@ -163,13 +164,14 @@ func parseSlots(bs []byte) []sbpf.Slot {
 
 func (l *Loader) getProgram() *sbpf.Program {
 	p := &sbpf.Program{
-		RO:          l.program,
-		TextBytes:   l.text,
-		Text:        parseSlots(l.text),
-		TextVA:      l.textVA(),
-		Entrypoint:  l.entrypoint,
-		Funcs:       l.funcs,
-		SbpfVersion: l.sbpfVersion(),
+		RO:               l.program,
+		ImportedSyscalls: l.importedSyscalls,
+		TextBytes:        l.text,
+		Text:             parseSlots(l.text),
+		TextVA:           l.textVA(),
+		Entrypoint:       l.entrypoint,
+		Funcs:            l.funcs,
+		SbpfVersion:      l.sbpfVersion(),
 	}
 	p.ResolveCallTargets()
 	return p

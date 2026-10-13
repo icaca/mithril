@@ -434,6 +434,9 @@ func ValidateUpgradeableLoaderProgram(programData []byte, f *features.Features) 
 }
 
 func deployProgram(execCtx *ExecutionCtx, programData []byte) (*sbpf.Program, error) {
+	if execCtx.SlotCtx != nil && execCtx.SlotCtx.AccountsDb != nil && execCtx.SlotCtx.AccountsDb.UseSharedProgramCache {
+		return LoadSharedProgram(programData, &execCtx.Features, true)
+	}
 	return validateUpgradeableLoaderProgram(programData, &execCtx.Features)
 }
 
@@ -1382,16 +1385,21 @@ func executeProgramFromBytes(execCtx *ExecutionCtx, programAddr solana.PublicKey
 	if entry, ok := execCtx.SlotCtx.AccountsDb.MaybeGetProgramFromCache(programAddr); ok && entry.MatchesSource(programData, &execCtx.Features) {
 		return executeLoadedProgram(execCtx, entry.Program, syscallRegistry)
 	}
-	loader, err := loader.NewLoaderWithSyscalls(programData, syscallRegistry, false, &execCtx.Features)
-	if err != nil {
-		return InstrErrUnsupportedProgramId
+	var program *sbpf.Program
+	var err error
+	if execCtx.SlotCtx.AccountsDb != nil && execCtx.SlotCtx.AccountsDb.UseSharedProgramCache {
+		program, err = LoadSharedProgram(programData, &execCtx.Features, false)
+	} else {
+		var elfLoader *loader.Loader
+		elfLoader, err = loader.NewLoaderWithSyscalls(programData, syscallRegistry, false, &execCtx.Features)
+		if err == nil {
+			program, err = elfLoader.Load()
+		}
+		if err == nil {
+			err = program.Verify()
+		}
 	}
-
-	program, err := loader.Load()
 	if err != nil {
-		return InstrErrUnsupportedProgramId
-	}
-	if err := program.Verify(); err != nil {
 		return InstrErrUnsupportedProgramId
 	}
 

@@ -178,6 +178,7 @@ func (l *Loader) applyReloc(reloc *elf.Rel64) error {
 		} else {
 			// Syscall
 			hash = sbpf.SymbolHash(name)
+			l.importedSyscalls = append(l.importedSyscalls, name)
 			if l.elfDeployChecks {
 				if !l.syscalls.ExistsByHash(hash) {
 					return fmt.Errorf("deployment check failure - hash did not exist in syscall registry (%s)", name)

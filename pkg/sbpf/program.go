@@ -17,6 +17,8 @@ type Program struct {
 	// CallTargets[pc] holds the resolved internal function target for a
 	// `call imm` slot at pc (non-static-syscall versions), or -1.
 	CallTargets []int64
+	// ImportedSyscalls retains relocation names for deployment validation.
+	ImportedSyscalls []string
 }
 
 // ResolveCallTargets precomputes CallTargets from Funcs so the interpreter
@@ -48,6 +50,9 @@ func (p *Program) MemoryBytes() uint64 {
 	}
 	if len(p.Funcs) > 0 {
 		total += uint64(len(p.Funcs)) * 32
+	}
+	for _, name := range p.ImportedSyscalls {
+		total += 16 + uint64(len(name))
 	}
 	return total
 }
