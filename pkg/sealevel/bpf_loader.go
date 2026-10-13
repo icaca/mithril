@@ -658,7 +658,9 @@ func serializeParametersAligned(execCtx *ExecutionCtx) ([]byte, []uint64, uint64
 	size += solana.PublicKeyLength     // program id
 
 	var serializedData []byte
-	if !execCtx.IsSimulation && execCtx.SlotCtx.SerializedParameterArena != nil {
+	if execCtx.SlotCtx.TransactionParameterArena != nil {
+		serializedData = execCtx.SlotCtx.TransactionParameterArena.alloc(size)[:0]
+	} else if !execCtx.IsSimulation && execCtx.SlotCtx.SerializedParameterArena != nil {
 		arenaData, _ := execCtx.SlotCtx.SerializedParameterArena.AllocN(size)
 		serializedData = arenaData[:0]
 	} else {
@@ -680,6 +682,7 @@ func serializeParametersAligned(execCtx *ExecutionCtx) ([]byte, []uint64, uint64
 			serializedData = serializedData[:l+8]
 			position := acct.indexOfAcct
 			serializedData[l] = byte(position)
+			clear(serializedData[l+1 : l+8])
 			preLens[i] = preLens[position]
 			accountMetadatas[i] = accountMetadatas[position]
 			virtualOffset += 8
@@ -1013,7 +1016,9 @@ func serializeParametersUnaligned(execCtx *ExecutionCtx) ([]byte, []uint64, uint
 	size += solana.PublicKeyLength     // program id
 
 	var serializedData []byte
-	if !execCtx.IsSimulation && execCtx.SlotCtx.SerializedParameterArena != nil {
+	if execCtx.SlotCtx.TransactionParameterArena != nil {
+		serializedData = execCtx.SlotCtx.TransactionParameterArena.alloc(size)[:0]
+	} else if !execCtx.IsSimulation && execCtx.SlotCtx.SerializedParameterArena != nil {
 		arenaData, _ := execCtx.SlotCtx.SerializedParameterArena.AllocN(size)
 		serializedData = arenaData[:0] // Use arena slice with zero length but full capacity
 	} else {

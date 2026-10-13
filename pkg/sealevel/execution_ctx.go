@@ -127,6 +127,9 @@ type SlotCtx struct {
 	LatestEvictedBlockhash    [32]byte
 
 	SerializedParameterArena *arena.Arena[byte]
+	// TransactionParameterArena is private to a sequential VM, including simulations.
+	// Reset it only after all transaction results have been detached from its buffers.
+	TransactionParameterArena *ParameterArena
 
 	TraceCtx context.Context
 }
